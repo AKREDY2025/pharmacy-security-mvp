@@ -1,0 +1,209 @@
+version: '3.8'
+
+# Production overrides for docker-compose.yml
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  # PostgreSQL with persistent volume and backups
+  db:
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    environment:
+      POSTGRES_INITDB_ARGS: -c max_connections=500 -c shared_buffers=256MB -c effective_cache_size=1GB
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+
+  # FastAPI Backend - Production configuration
+  backend:
+    restart: always
+    environment:
+      LOG_LEVEL: WARNING
+      ENVIRONMENT: production
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+    command: >
+      gunicorn main:app 
+      --workers 4
+      --worker-class uvicorn.workers.UvicornWorker
+      --bind 0.0.0.0:8000
+      --timeout 60
+      --access-logfile -
+      --error-logfile -
+      --log-level warning
+
+  # React Frontend - Production build
+  frontend:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+    command: serve -s build -l 3000
+
+  # Nginx - Production reverse proxy
+  nginx:
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # Prometheus - Metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: pharmacy_security_prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+    restart: always
+    networks:
+      - security_mvp_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+    profiles:
+      - production
+
+  # Grafana - Metrics visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: pharmacy_security_grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-change_me}
+      GF_INSTALL_PLUGINS: grafana-clock-panel
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: always
+    networks:
+      - security_mvp_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+    profiles:
+      - production
+
+  # pgAdmin - Database management UI
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pharmacy_security_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+    ports:
+      - "5050:80"
+    depends_on:
+      - db
+    restart: always
+    networks:
+      - security_mvp_network
+    profiles:
+      - production
+
+  # Backup service
+  backup:
+    image: alpine:latest
+    container_name: pharmacy_security_backup
+    volumes:
+      - ./backups:/backups
+      - postgres_data:/var/lib/postgresql/data:ro
+    depends_on:
+      - db
+    restart: always
+    networks:
+      - security_mvp_network
+    profiles:
+      - production
+    command: >
+      sh -c "
+        while true; do
+          date >> /backups/backup.log
+          docker exec pharmacy_security_db pg_dump -U security_mvp security_mvp | 
+            gzip > /backups/security_mvp_$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz
+          find /backups -name 'security_mvp_*.sql.gz' -mtime +30 -delete
+          sleep 86400
+        done
+      "
+
+volumes:
+  postgres_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  security_mvp_network:
+    driver: bridge
+
+# ============================================================================
+# PRODUCTION STARTUP COMMAND
+# ============================================================================
+# docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# Services:
+# - db: PostgreSQL (port 5432)
+# - backend: FastAPI with gunicorn (port 8000)
+# - frontend: React production build (port 3000)
+# - nginx: Reverse proxy with SSL (ports 80, 443)
+# - prometheus: Metrics (port 9090) - optional
+# - grafana: Dashboards (port 3001) - optional
+# - pgadmin: DB management (port 5050) - optional
+# - backup: Automated database backups
+#
+# Resource limits:
+# - backend: 2 CPU, 2GB RAM max
+# - frontend: 1 CPU, 512MB RAM max
+# - nginx: 0.5 CPU, 256MB RAM max
+#
+# Logging:
+# - All services log to JSON files
+# - Log rotation enabled (max 100MB per service)
+# - 30-day Prometheus retention
+# ============================================================================
