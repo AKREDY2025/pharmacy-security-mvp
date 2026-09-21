@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PharmSecure - Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #f5f5f5;
+            min-height: 100vh;
+        }
+        
+        .navbar {
+            background: linear-gradient(135deg, #1e5631 0%, #004d00 100%);
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .navbar h1 {
+            font-size: 22px;
+        }
+        
+        .navbar button {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 30px auto;
+            padding: 20px;
+        }
+        
+        .card {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+        
+        .card h2 {
+            color: #1e5631;
+            margin-bottom: 20px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            color: #333;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        
+        .verify-btn {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #1e5631 0%, #004d00 100%);
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-weight: 600;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        
+        .result {
+            display: none;
+            margin-top: 20px;
+            padding: 20px;
+            border-radius: 5px;
+            border-left: 4px solid;
+        }
+        
+        .result.authentic {
+            background: #d4edda;
+            border-color: #28a745;
+            color: #155724;
+        }
+        
+        .result.counterfeit {
+            background: #f8d7da;
+            border-color: #dc3545;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <div class="navbar">
+        <h1>🔒 PharmSecure Dashboard</h1>
+        <button onclick="logout()">Logout</button>
+    </div>
+    
+    <div class="container">
+        <div class="card">
+            <h2>Welcome, <span id="username"></span>!</h2>
+            <p>Verify product authenticity</p>
+        </div>
+        
+        <div class="card">
+            <h2>📦 Verify Product</h2>
+            
+            <form id="verifyForm">
+                <div class="form-group">
+                    <label>Serial Number</label>
+                    <input 
+                        type="text" 
+                        id="serial" 
+                        placeholder="AX-2024-001234"
+                        value="AX-2024-001234"
+                        required
+                    >
+                </div>
+                
+                <button type="submit" class="verify-btn">VERIFY PRODUCT</button>
+            </form>
+            
+            <div class="result" id="result"></div>
+        </div>
+    </div>
+    
+    <script>
+        const API_URL = "https://6532-154-161-85-133.ngrok-free.app";
+        
+        document.addEventListener("DOMContentLoaded", () => {
+            const token = localStorage.getItem("token");
+            const username = localStorage.getItem("username");
+            
+            if (!token) {
+                window.location.href = "login.html";
+                return;
+            }
+            
+            document.getElementById("username").textContent = username || "User";
+        });
+        
+        document.getElementById("verifyForm").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            
+            const serial = document.getElementById("serial").value;
+            const token = localStorage.getItem("token");
+            const resultDiv = document.getElementById("result");
+            
+            try {
+                const response = await fetch(`${API_URL}/api/v1/verify`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Authorization": `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ serial_number: serial })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.detail || "Verification failed");
+                }
+                
+                const isAuthentic = data.result === "AUTHENTIC";
+                resultDiv.className = `result ${isAuthentic ? "authentic" : "counterfeit"}`;
+                resultDiv.innerHTML = `
+                    <h3>${isAuthentic ? "✅ AUTHENTIC" : "⚠️ COUNTERFEIT"}</h3>
+                    <p><strong>Serial:</strong> ${data.serial_number}</p>
+                    <p><strong>Confidence:</strong> ${(data.confidence_score * 100).toFixed(0)}%</p>
+                    <p><strong>Message:</strong> ${data.message}</p>
+                `;
+                resultDiv.style.display = "block";
+                
+            } catch (error) {
+                resultDiv.className = "result counterfeit";
+                resultDiv.innerHTML = `<h3>❌ Error</h3><p>${error.message}</p>`;
+                resultDiv.style.display = "block";
+            }
+        });
+        
+        function logout() {
+            localStorage.removeItem("token");
+            localStorage.removeItem("username");
+            window.location.href = "login.html";
+        }
+    </script>
+</body>
+</html>
